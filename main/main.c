@@ -9,6 +9,7 @@
 
 #define TM1640_CLOCK_PIN 16
 #define TM1640_DATA_PIN 17
+#define TM1640_PULLUP 1
 
 #define COMMAND_DATA 0x40
 #define COMMAND_DISPLAY 0x80
@@ -28,7 +29,10 @@
 
 #define CLOCK_LOW gpio_set_level(TM1640_CLOCK_PIN, 0)
 #define CLOCK_HIGH gpio_set_level(TM1640_CLOCK_PIN, 1)
-#define DELAY(usec) delay_microseconds(usec)
+
+static int64_t micro_sec_timer;
+#define DELAY(usec) micro_sec_timer = esp_timer_get_time();while(esp_timer_get_time() - micro_sec_timer < usec) {}
+
 
 /*
  *     00
@@ -39,58 +43,63 @@
  *   4    2
  *     33   7
  *
- *		0		1	2		3	4		5	6		7	8		9
+ *     0	 1     2	 3     4	 5     6     7     8     9
  *     0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x27, 0x7f, 0x67
  */
 
 
-void delay_microseconds(uint64_t usec) {
-	int64_t start = esp_timer_get_time();
-	uint32_t counter = 0;
-	while(esp_timer_get_time() - start < usec) {++counter;}
-}
-
 esp_err_t send_start(void) {
 	esp_err_t ret = 0;
+
 	ret = DATA_LOW;
-	DELAY(1);
 	if(ret) return ret;
+	// DELAY(1)
+
 	ret = CLOCK_LOW;
-	DELAY(1);
-	return ret;
+    if(ret) return ret;
+	// DELAY(1)
+
+	return ESP_OK;
 }
 
 esp_err_t send_byte(uint8_t send_data) {
 	esp_err_t ret = 0;
+
 	for(int i = 0; i < 8; ++i) {
 		bool current_bit = ( (send_data & (1 << i) ) >> i);
+
 		ret = SET_DATA_PIN(current_bit);
-		DELAY(1);
 		if(ret) return ret;
+		// DELAY(1)
+
 
 		ret = CLOCK_HIGH;
-		DELAY(2);
 		if(ret) return ret;
+		// DELAY(1)
 
 		ret = CLOCK_LOW;
-		DELAY(1);
+		if(ret) return ret;
+		// DELAY(1)
 	}
-	return ret;
+	return ESP_OK;
 }
 
 esp_err_t send_end(void) {
 	esp_err_t ret = 0;
+
 	ret = DATA_LOW;
-	DELAY(1);
 	if(ret) return ret;
+	// DELAY(1)
 
 	ret = CLOCK_HIGH;
-	DELAY(1);
 	if(ret) return ret;
+	// DELAY(1)
 
 	ret = DATA_HIGH;
-	DELAY(2);
-	return ret;
+    if(ret) return ret;
+	// DELAY(1)
+
+	return ESP_OK;
 }
 
 esp_err_t write_sram(uint8_t* write_buf, size_t buf_size, uint8_t offset) {
@@ -146,16 +155,25 @@ esp_err_t tm1640_init(uint8_t clock_pin, uint8_t data_pin) {
 	ret = gpio_set_direction(clock_pin, GPIO_MODE_OUTPUT);
 	if(ret) return ret;
 
-	ret = gpio_pullup_en(clock_pin);
-	if(ret) return ret;
-
-	ret = CLOCK_HIGH;
-	if(ret) return ret;
-
 	ret = gpio_set_direction(TM1640_DATA_PIN, GPIO_MODE_OUTPUT);
 	if(ret) return ret;
 
-	ret = gpio_pullup_en(TM1640_DATA_PIN);
+	if(TM1640_PULLUP) {
+        ret = gpio_pullup_en(clock_pin);
+        if(ret) return ret;
+
+        ret = gpio_pullup_en(TM1640_DATA_PIN);
+        if(ret) return ret;
+	}
+	else {
+        ret = gpio_pullup_dis(clock_pin);
+        if(ret) return ret;
+
+        ret = gpio_pullup_dis(TM1640_DATA_PIN);
+        if(ret) return ret;
+	}
+
+	ret = CLOCK_HIGH;
 	if(ret) return ret;
 
 	return DATA_HIGH;
@@ -174,17 +192,17 @@ void app_main(void)
 	uint8_t segments2[] = {
 			0x66, 0x6d, 0x7d, 0x27, 0x7f, 0x67, 0x1d
 	};
+	display_brightness(0);
 	sleep(2);
 	ESP_ERROR_CHECK(write_sram(full, sizeof(full) / sizeof(*full), 0) );
 
-	for(int i = 0; i < 9; ++i) {
-		delay_microseconds(200 * 1000);
+	for(int i = 1; i < 9; ++i) {
+		DELAY(200 * 1000)
 		ESP_ERROR_CHECK(display_brightness((uint8_t)i) );
 	}
 
     while (true) {
     	ESP_ERROR_CHECK(write_sram(segments, sizeof(segments) / sizeof(*segments), 0) );
-//        printf("Hello from app_main!\n");
         sleep(1);
         ESP_ERROR_CHECK(write_sram(segments2, sizeof(segments2) / sizeof(*segments), 0) );
         sleep(1);
